@@ -229,6 +229,67 @@ data/transcripts/
 - **Docker 下自动持久化**：存档目录在 `data/` 内，已被 compose 挂载，容器重启不丢。
 - 面板「对话存档」卡片可查看列表并下载 JSONL。
 
+### 文件与图片输入
+
+网关接受 OpenAI 的多模态 `content` 数组，把文件落到上游 Sumus 后随消息一起发出，模型能真正读到内容（已实测：读出 txt 里的文字、识别出图片颜色）。
+
+支持三种写法：
+
+**1. `input_file` + 内联 base64**（最通用，推荐）
+
+```json
+{
+  "model": "openai/gpt-6-luna",
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "text", "text": "这份文件里的公司代号是什么？"},
+      {"type": "input_file", "filename": "note.txt",
+       "file_data": "data:text/plain;base64,SGVsbG8gV29ybGQ="}
+    ]
+  }]
+}
+```
+
+`file_data` 支持带 `data:<mime>;base64,` 前缀，也支持裸 base64。
+
+**2. `image_url` + base64 data URI**（图片推荐）
+
+```json
+{"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KG..."}}
+```
+
+**3. `image_url` + http/https URL**（网关代下载）
+
+```json
+{"type": "image_url", "image_url": {"url": "https://example.com/pic.png"}}
+```
+
+几条限制：
+
+- **不支持 `file_id` 引用**。没有实现 `/v1/files` 上传接口，所以客户端若先调 files 接口拿到 `file_id` 再引用，网关会直接报错提示改用 base64 内联，而不是静默丢文件。
+- **URL 只允许 `http`/`https`**，`file://` 会被拒绝（防 SSRF 打内网）。
+- **URL 下载上限 20 MiB**；超限返回错误。内联 base64 不受此限，但受 HTTP body 大小限制。
+- 多个附件可以在一条消息里同时给出，顺序保留。
+- 纯字符串 `content`（老式写法）继续可用，行为不变。
+
+**上游协议**（逆向所得，供排查参考）：
+
+```
+POST /api/app/uploads
+  {"files":[{"name":"note.txt","type":"text/plain","size":11}],
+   "target":{"kind":"agent","id":"<agent-id>"},
+   "purpose":"attachment"}
+  → 返回 upload_url（S3 预签名）、file_url、id
+
+PUT <upload_url>          ← 二进制原文，不能带自定义 header
+
+POST /api/app/sessions/{sid}/messages
+  {..., "attachment_ids":["<id>"]}
+```
+
+注意第一步的 `size` 必须与实际上传字节数一致，否则上游会拒。
+
 ## 可用模型
 
 21 个（实时从 `/api/app/models` 拉取，走 OpenRouter 上游）：
@@ -269,6 +330,10 @@ inception/mercury-3
 
 本项目仅限管理**你自己**的 Sumus 账号。禁止批量注册小号、对外售卖额度、二次打包分发。
 
+### 附件会消耗额外积分
+
+每个附件都会作为独立输入进入上游，图片按多模态计费，比纯文本贵。积分是一次性的（见上），大量传图会明显加速耗尽。
+
 ## 运维端点
 
 | 端点 | 鉴权 | 说明 |
@@ -284,7 +349,7 @@ inception/mercury-3
 | `/admin/api/transcripts/{file}` | 是 | 下载某个存档文件（JSONL） |
 | `/status` | 是 | 账号池详情（JSON，供脚本用） |
 | `/v1/models` | 是 | OpenAI 格式模型列表 |
-| `/v1/chat/completions` | 是 | OpenAI 格式对话接口 |
+| `/v1/chat/completions` | 是 | OpenAI 格式对话接口（支持多模态附件，见「文件与图片输入」） |
 
 ### 账号池管理面板
 
@@ -358,10 +423,11 @@ sumus2api/
 │   ├── config/               # 配置加载与默认值
 │   ├── account/              # 账号凭证：加载/落盘/在途计数
 │   ├── upstream/             # Sumus 私有协议客户端 + 账号池
-│   │   ├── client.go         #   HTTP 端点封装
+│   │   ├── client.go         #   HTTP 端点封装 + 附件上传三步
 │   │   └── pool.go           #   选号/粘性/轮询对话
+│   ├── transcript/           # 对话存档（JSONL，按会话分文件）
 │   └── proxy/                # OpenAI 兼容层
-│       ├── handler.go        #   路由分发、鉴权、对话接口
+│       ├── handler.go        #   路由分发、鉴权、对话接口、多模态解析
 │       ├── panel.go          #   账号池管理 API（/admin/api/*）
 │       └── panel/            #   内嵌管理面板（embed 进二进制）
 │           └── index.html

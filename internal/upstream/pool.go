@@ -242,6 +242,8 @@ type ChatInput struct {
 	Messages        []Message
 	Model           string
 	Stream          bool
+	// AttachmentIDs 是已上传到 Sumus 的文件 ID，随首条消息一起发送。
+	AttachmentIDs []string
 }
 
 // ChatOutput 是对话结果。
@@ -276,10 +278,11 @@ func (c *Client) Chat(ctx context.Context, cred *account.Cred, workspaceID strin
 	}
 
 	if _, err := c.SendMessage(ctx, cred.SessionToken, workspaceID, SendMessageInput{
-		SessionID: sessionID,
-		AgentID:   in.AgentID,
-		Content:   content,
-		Model:     in.Model,
+		SessionID:     sessionID,
+		AgentID:       in.AgentID,
+		Content:       content,
+		Model:         in.Model,
+		AttachmentIDs: in.AttachmentIDs,
 	}); err != nil {
 		return nil, err
 	}

@@ -43,10 +43,11 @@ type Entry struct {
 	Error string `json:"error,omitempty"`
 }
 
-// Message 是存档用的消息条目，只保留角色与文本。
+// Message 是存档用的消息条目，只保留角色与文本，以及引用的文件名。
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string   `json:"role"`
+	Content string   `json:"content"`
+	Files   []string `json:"files,omitempty"`
 }
 
 // Store 管理存档目录与写入。

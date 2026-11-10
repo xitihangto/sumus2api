@@ -325,6 +325,8 @@ type SendMessageInput struct {
 	AgentID   string
 	Content   string
 	Model     string
+	// AttachmentIDs 是已通过 UploadFile 上传的文件 ID 列表。
+	AttachmentIDs []string
 }
 
 // SendMessageResult 是发消息的响应。
@@ -341,6 +343,9 @@ func (c *Client) SendMessage(ctx context.Context, sessionToken, workspaceID stri
 	}
 	if in.Model != "" {
 		payload["model"] = in.Model
+	}
+	if len(in.AttachmentIDs) > 0 {
+		payload["attachment_ids"] = in.AttachmentIDs
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -484,4 +489,147 @@ func parseAPIError(status int, body []byte) error {
 func IsUnauthorized(err error) bool {
 	ae, ok := err.(*APIError)
 	return ok && ae.Status == http.StatusUnauthorized
+}
+
+// ---- 文件上传 ----
+//
+// Sumus 的附件传输分三步（从网页端抓包得到）：
+//
+//  1. POST /api/app/uploads  声明要传什么，拿到 S3 预签名 URL 与文件 ID
+//  2. PUT  <upload_url>      把二进制直传 S3
+//  3. POST .../messages      发消息时在 attachment_ids 里引用文件 ID
+//
+// 之前探测到的 405/「no files provided」都是因为缺了第 1 步的 JSON 声明体。
+
+// UploadTarget 描述附件归属的目标对象。
+type UploadTarget struct {
+	Kind string `json:"kind"` // "agent"
+	ID   string `json:"id"`
+}
+
+// UploadFile 声明一个待上传文件。
+type UploadFile struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Size int64  `json:"size"`
+}
+
+// UploadResult 是单个文件的上传结果。
+type UploadResult struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	UploadURL string `json:"upload_url"`
+	FileURL   string `json:"file_url"`
+}
+
+// UploadFile 完成一个文件的完整上传（声明 + 直传 S3），返回文件 ID 与访问 URL。
+//
+// contentType 为空时按扩展名猜测；data 是文件二进制内容。
+func (c *Client) UploadFile(ctx context.Context, sessionToken, workspaceID, targetID string, name string, data []byte, contentType string) (*UploadResult, error) {
+	if contentType == "" {
+		contentType = guessContentType(name)
+	}
+
+	// 第 1 步：声明
+	declare := map[string]any{
+		"files":   []UploadFile{{Name: name, Type: contentType, Size: int64(len(data))}},
+		"target":  UploadTarget{Kind: "agent", ID: targetID},
+		"purpose": "attachment",
+	}
+	body, err := json.Marshal(declare)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/app/uploads", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header = c.commonHeaders(workspaceID)
+	req.Header.Set("Cookie", "__Secure-better-auth.session_token="+sessionToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", c.baseURL)
+	req.Header.Set("Referer", c.baseURL+"/app")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	respBody, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, parseAPIError(resp.StatusCode, respBody)
+	}
+
+	var wrap struct {
+		Uploads []UploadResult `json:"uploads"`
+	}
+	if err := json.Unmarshal(respBody, &wrap); err != nil {
+		return nil, fmt.Errorf("解析上传响应: %w", err)
+	}
+	if len(wrap.Uploads) == 0 {
+		return nil, fmt.Errorf("上传响应里没有文件: %s", truncate(string(respBody), 200))
+	}
+	up := wrap.Uploads[0]
+
+	// 第 2 步：直传 S3（预签名 URL，不需要 cookie）
+	putReq, err := http.NewRequestWithContext(ctx, http.MethodPut, up.UploadURL, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	putReq.Header.Set("Content-Type", contentType)
+	putResp, err := c.http.Do(putReq)
+	if err != nil {
+		return nil, fmt.Errorf("直传 S3: %w", err)
+	}
+	io.Copy(io.Discard, putResp.Body)
+	putResp.Body.Close()
+	if putResp.StatusCode != http.StatusOK && putResp.StatusCode != http.StatusNoContent {
+		return nil, fmt.Errorf("S3 直传失败: HTTP %d", putResp.StatusCode)
+	}
+
+	return &up, nil
+}
+
+// guessContentType 按扩展名猜测 MIME 类型。
+func guessContentType(name string) string {
+	ext := strings.ToLower(name)
+	if i := strings.LastIndex(ext, "."); i >= 0 {
+		ext = ext[i+1:]
+	}
+	switch ext {
+	case "txt", "md", "log", "csv", "json", "xml", "yaml", "yml":
+		return "text/plain"
+	case "png":
+		return "image/png"
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "gif":
+		return "image/gif"
+	case "webp":
+		return "image/webp"
+	case "pdf":
+		return "application/pdf"
+	case "doc":
+		return "application/msword"
+	case "docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case "xls":
+		return "application/vnd.ms-excel"
+	case "xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// truncate 截断字符串到指定长度。
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
