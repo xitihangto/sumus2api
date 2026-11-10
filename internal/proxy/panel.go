@@ -121,19 +121,24 @@ func (h *Handler) adminAdd(w http.ResponseWriter, r *http.Request) {
 			req.Name = req.Name[:20]
 		}
 	}
-	// 过滤文件名非法字符
+	// 统一为账号 stem：去掉可能带的 .json 后缀，再过滤非法字符。
+	// 允许 '.' 会导致生成 name.json.json，故这里只留字母数字与 -_。
+	req.Name = strings.TrimSuffix(req.Name, ".json")
 	req.Name = strings.Map(func(r rune) rune {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 			return r
-		case r == '-', r == '_', r == '.':
+		case r == '-', r == '_':
 			return r
 		default:
 			return '-'
 		}
 	}, req.Name)
+	if req.Name == "" {
+		req.Name = "account"
+	}
 
-	path := filepath.Join(h.cfg.AccountDir, req.Name+".json")
+	path := h.credPath(req.Name)
 	c := &account.Cred{
 		SessionToken:    req.SessionToken,
 		CookieExpiresAt: req.CookieExpiresAt,
@@ -173,35 +178,28 @@ func (h *Handler) adminAccountAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := filepath.Join(h.cfg.AccountDir, name+".json")
+	// name 允许带或不带 .json 后缀；统一成 stem 再定位文件。
+	name = strings.TrimSuffix(name, ".json")
+	c := h.findCred(name)
+	if c == nil {
+		writeOpenAIError(w, http.StatusNotFound, "not_found", "账号不存在: "+name)
+		return
+	}
+	// 后续一律用凭证自带的真实路径，不再靠 name 重新拼，避免路径不一致。
+	path := c.Path()
 
 	switch {
 	case action == "enable" && r.Method == http.MethodPost:
-		c := h.pool.Find(path)
-		if c == nil {
-			writeOpenAIError(w, http.StatusNotFound, "not_found", "账号不存在: "+name)
-			return
-		}
 		c.SetDisabled(false, "")
 		_ = c.SaveAtomic()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 
 	case action == "disable" && r.Method == http.MethodPost:
-		c := h.pool.Find(path)
-		if c == nil {
-			writeOpenAIError(w, http.StatusNotFound, "not_found", "账号不存在: "+name)
-			return
-		}
 		c.SetDisabled(true, "manual")
 		_ = c.SaveAtomic()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 
 	case action == "refresh" && r.Method == http.MethodPost:
-		c := h.pool.Find(path)
-		if c == nil {
-			writeOpenAIError(w, http.StatusNotFound, "not_found", "账号不存在: "+name)
-			return
-		}
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -210,11 +208,7 @@ func (h *Handler) adminAccountAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 
 	case action == "" && r.Method == http.MethodDelete:
-		c := h.pool.Remove(path)
-		if c == nil {
-			writeOpenAIError(w, http.StatusNotFound, "not_found", "账号不存在: "+name)
-			return
-		}
+		h.pool.Remove(path)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			writeOpenAIError(w, http.StatusInternalServerError, "delete_failed", "删除文件失败: "+err.Error())
 			return
@@ -225,6 +219,29 @@ func (h *Handler) adminAccountAction(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method_not_allowed",
 			"不支持的方法或动作: "+r.Method+" "+action)
 	}
+}
+
+// findCred 按账号名查找凭证：先精确匹配路径，再回退到按文件 stem 匹配。
+// 回退是为了兼容历史凭证文件名（例如手工创建时带了不规范的点号）。
+func (h *Handler) findCred(name string) *account.Cred {
+	if c := h.pool.Find(h.credPath(name)); c != nil {
+		return c
+	}
+	for _, c := range h.pool.List() {
+		p := c.Path()
+		if p == "" {
+			continue
+		}
+		if strings.TrimSuffix(filepath.Base(p), filepath.Ext(p)) == name {
+			return c
+		}
+	}
+	return nil
+}
+
+// credPath 由账号 stem 拼出凭证文件的绝对/相对路径。
+func (h *Handler) credPath(name string) string {
+	return filepath.Join(h.cfg.AccountDir, name+".json")
 }
 
 // baseURL 拼出客户端访问网关时用的对外地址。

@@ -264,6 +264,49 @@ inception/mercury-3
 
 > 面板与 API 共用同一套鉴权。若网关**未设** `api_key`（Docker 默认），则面板完全开放——任何能访问 7864 端口的人都能增删账号。建议仅在可信网络内使用，或自行在反向代理层加访问控制。
 
+#### 怎么新增一个账号
+
+**第 1 步：拿到 `session_token`**
+
+在 ego lite 里登录 Sumus，然后导出 cookie：
+
+```bash
+# 1) 打开 Sumus 并登录，记下输出的 spaceId
+ego-browser nodejs -e '
+const task = await taskSpace("sumus-export");
+const page = task.page("p1");
+await page.goto("https://sumus.im/app/sign-in");
+console.log("spaceId:", task.spaceId);
+'
+
+# 2) 登录完成后导出（把 <spaceId> 换成上一步输出的值）
+node scripts/export-cookie.mjs <spaceId> my-account accounts/
+```
+
+导出的 `accounts/my-account.json` 里就有 `session_token` 字段。
+
+**第 2 步：在面板里添加**
+
+浏览器打开 `/admin/`，在「账号」卡片顶部的表单填：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| 账号名 | 否 | 留空则自动用 token 前缀命名；只允许字母、数字、`-`、`_` |
+| session_token | **是** | 就是上一步文件里那段 `session_token` 值 |
+| 过期时间戳 | 否 | 留空也能用；填了面板才会显示 cookie 剩余天数 |
+
+点「添加账号」，网关会立即写入文件并后台拉取余额/身份。刷新面板即可看到新账号。
+
+**或者直接放文件**（等价做法）：
+
+```bash
+# 把导出的凭证文件丢进 accounts/ 目录，重启网关即可被扫描到
+cp ~/Downloads/my-account.json ./accounts/
+docker compose restart
+```
+
+> 账号名（`name`）在网关内部统一为**不带 `.json` 后缀的文件 stem**。面板表格里的「删除」「禁用」等操作都基于它定位文件，所以不要手工给凭证文件起带点号的怪名字。
+
 ## 项目结构
 
 ```

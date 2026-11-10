@@ -107,10 +107,20 @@ func (c *Cred) Snapshot() Snapshot {
 	if s.DisplayName == "" {
 		s.DisplayName = s.Email
 	}
-	if s.Name == "" {
-		s.Name = filepath.Base(s.FilePath)
+	// name 统一为不带 .json 后缀的文件 stem，作为账号标识。
+	// 路由与面板都用它拼 accounts/<name>.json，若带后缀会拼成 name.json.json。
+	if s.Name == "" || s.Name == s.FilePath {
+		s.Name = accountStem(s.FilePath)
+	} else if strings.HasSuffix(s.Name, ".json") {
+		s.Name = strings.TrimSuffix(s.Name, ".json")
 	}
 	return s
+}
+
+// accountStem 取凭证文件的账号名（去掉目录与 .json 后缀）。
+func accountStem(path string) string {
+	base := filepath.Base(path)
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
 // InFlight 返回当前在途请求数。
