@@ -1,6 +1,6 @@
 services:
   sumus2api:
-    image: ghcr.io/xitihangto/sumus2api:latest
+    image: ghcr.dockerproxy.net/xitihangto/sumus2api:latest
     container_name: sumus2api
     restart: unless-stopped
     user: "0:0"

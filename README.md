@@ -84,7 +84,7 @@ docker compose exec sumus2api vi /app/config.json   # 填入 api_key
 docker compose restart
 ```
 
-> **注意**：compose 里的镜像指向 `ghcr.io/xitihangto/sumus2api:latest`。首次使用前需要先把镜像推上去（见下方"构建与发布镜像"），或改用本地构建：
+> **注意**：compose 里的镜像走加速站 `ghcr.dockerproxy.net/xitihangto/sumus2api:latest`。首次使用前需要先把镜像推上去（见下方"构建与发布镜像"），或改用本地构建：
 >
 > ```yaml
 > services:
@@ -120,12 +120,16 @@ git tag v0.1.0 && git push origin v0.1.0
 ```
 
 镜像地址：`ghcr.io/xitihangto/sumus2api:latest`
+加速拉取：`ghcr.dockerproxy.net/xitihangto/sumus2api:latest`（compose 默认走这个）
 
 本地手动构建（需 docker + buildx）：
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
   -t ghcr.io/xitihangto/sumus2api:latest --push .
+
+# 推送后，用加速站拉取：
+#   docker pull ghcr.dockerproxy.net/xitihangto/sumus2api:latest
 ```
 
 ### 验证
