@@ -20,5 +20,9 @@
   "session": {
     "enabled": true,
     "ttl_minutes": 30
+  },
+  "transcript": {
+    "dir": "./data/transcripts",
+    "max_bytes_per_file": 5242880
   }
 }

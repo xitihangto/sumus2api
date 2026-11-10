@@ -24,6 +24,8 @@ var panelFS embed.FS
 //
 //	GET  /admin/                          → 面板页面（HTML，免鉴权）
 //	GET  /admin/api/accounts              → 账号列表 + 接入配置（支持 ?key= 供浏览器用）
+//	GET  /admin/api/transcripts          → 存档文件列表
+//	GET  /admin/api/transcripts/{file}   → 某个存档文件的 JSONL 内容
 //	POST /admin/api/accounts              → 新增账号
 //	POST /admin/api/accounts/{name}/enable   → 启用
 //	POST /admin/api/accounts/{name}/disable  → 禁用
@@ -52,6 +54,15 @@ func (h *Handler) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Path == "/admin/api/transcripts" {
+		h.adminTranscriptList(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/admin/api/transcripts/") {
+		h.adminTranscriptRead(w, r)
+		return
+	}
+
 	h.adminAccountAction(w, r)
 }
 
@@ -64,6 +75,38 @@ func (h *Handler) servePanel(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
+// adminTranscriptList 返回存档文件列表与存档配置。
+func (h *Handler) adminTranscriptList(w http.ResponseWriter, r *http.Request) {
+	files := []string{}
+	enabled := h.transcript != nil && h.transcript.Enabled()
+	if enabled {
+		files = h.transcript.List()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": enabled,
+		"dir":     h.transcript.Dir(),
+		"files":   files,
+	})
+}
+
+// adminTranscriptRead 返回指定存档文件的原始 JSONL 内容。
+// 文件名从路径末段取，防止路径穿越（Store 内部还会再校验一次）。
+func (h *Handler) adminTranscriptRead(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/admin/api/transcripts/")
+	if name == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "bad_request", "缺少文件名")
+		return
+	}
+	data, err := h.transcript.ReadFile(name)
+	if err != nil {
+		writeOpenAIError(w, http.StatusNotFound, "not_found", "读取存档失败: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
 	_, _ = w.Write(data)
 }
 

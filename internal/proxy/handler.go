@@ -6,26 +6,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"sumus2api/internal/account"
 	"sumus2api/internal/config"
+	"sumus2api/internal/transcript"
 	"sumus2api/internal/upstream"
 )
 
 // Handler 是 OpenAI 兼容网关的 HTTP 处理器。
 type Handler struct {
-	cfg    *config.Config
-	client *upstream.Client
-	pool   *upstream.Pool
-	store  *account.Store
+	cfg        *config.Config
+	client     *upstream.Client
+	pool       *upstream.Pool
+	store      *account.Store
+	transcript *transcript.Store
 }
 
 // NewHandler 构造处理器。store 用于面板新增账号时定位写入目录。
 func NewHandler(cfg *config.Config, client *upstream.Client, pool *upstream.Pool, store *account.Store) *Handler {
-	return &Handler{cfg: cfg, client: client, pool: pool, store: store}
+	return &Handler{
+		cfg:        cfg,
+		client:     client,
+		pool:       pool,
+		store:      store,
+		transcript: transcript.New(cfg.Transcript.Dir, cfg.Transcript.MaxBytesPerFile),
+	}
 }
 
 // ServeHTTP 路由分发。
@@ -99,6 +108,8 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	start := time.Now()
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "bad_request", "读取请求体失败")
@@ -162,9 +173,11 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 			cred.DisableRea = "cookie expired"
 			cred.Unlock()
 			h.pool.Unbind(convKey)
+			h.saveTranscript(convKey, cred, req, "", nil, time.Since(start), "unauthorized: cookie expired")
 			writeOpenAIError(w, http.StatusUnauthorized, "unauthorized", "Sumus 凭证已过期，需要重新登录")
 			return
 		}
+		h.saveTranscript(convKey, cred, req, "", nil, time.Since(start), err.Error())
 		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
@@ -178,11 +191,53 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		text = out.Message.Content
 	}
 
+	// 异步存档：不阻塞响应，失败也不影响主流程
+	h.saveTranscript(convKey, cred, req, text, out, time.Since(start), "")
+
 	if req.Stream {
 		h.writeStream(w, req.Model, text, out.Message.ID)
 		return
 	}
 	h.writeNonStream(w, req.Model, text, out.Message.ID)
+}
+
+// saveTranscript 把一轮对话写入存档。异步执行。
+func (h *Handler) saveTranscript(convKey string, cred *account.Cred, req chatRequest, reply string, out *upstream.ChatOutput, dur time.Duration, errMsg string) {
+	if h.transcript == nil || !h.transcript.Enabled() {
+		return
+	}
+	// 用快照读账号名，避免与 warmup 的写入竞争
+	acctName := ""
+	if snap := cred.Snapshot(); snap.Name != "" {
+		acctName = snap.Name
+	} else if snap.Email != "" {
+		acctName = snap.Email
+	}
+
+	entry := transcript.Entry{
+		Conversation: convKey,
+		Account:      acctName,
+		Model:        req.Model,
+		Stream:       req.Stream,
+		DurationMS:   dur.Milliseconds(),
+		Reply:        reply,
+		Error:        errMsg,
+	}
+	if out != nil {
+		entry.SessionID = out.SessionID
+		entry.MessageID = out.Message.ID
+	}
+	for _, m := range req.Messages {
+		entry.Request = append(entry.Request, transcript.Message{Role: m.Role, Content: m.Content})
+	}
+	if entry.Request == nil {
+		entry.Request = []transcript.Message{}
+	}
+	go func() {
+		if err := h.transcript.Append(entry); err != nil {
+			log.Printf("[transcript] 存档失败: %v", err)
+		}
+	}()
 }
 
 // writeStream 以 SSE 形式返回单个 completion chunk + [DONE]。

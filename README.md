@@ -188,6 +188,46 @@ print(resp.choices[0].message.content)
 | `pool.max_in_flight` | `3` | 单账号最大在途请求数，0 = 不限 |
 | `session.enabled` | `true` | 会话粘性开关 |
 | `session.ttl_minutes` | `30` | 粘性绑定存活时长 |
+| `transcript.dir` | `./data/transcripts` | 对话存档目录；**空字符串 = 关闭存档** |
+| `transcript.max_bytes_per_file` | `5242880` | 单会话存档体积上限（字节），超出滚动到 `.1` 后缀；0 = 不限 |
+
+### 对话存档
+
+上游 Sumus 不保留可回读的会话历史（结果靠轮询拿，关掉页面就丢）。开启存档后，网关把每轮请求与回复写入 JSONL：
+
+```
+data/transcripts/
+├── demo-archive-1.jsonl      ← 一个会话一个文件
+├── demo-archive-2.jsonl
+└── ...
+```
+
+每行一条记录：
+
+```json
+{"time":"2026-11-11T06:54:16+08:00","conversation":"demo-archive-1","session_id":"b2cf0b9e-...","account":"linqy","model":"openai/gpt-6-luna","stream":false,"duration_ms":34623,"request":[{"role":"user","content":"你好"}],"reply":"你好，存档测试消息收到。","message_id":"01a1c7ab-..."}
+```
+
+字段说明：
+
+| 字段 | 含义 |
+|---|---|
+| `time` | 写入时间（RFC3339，本地时区） |
+| `conversation` | 会话标识（`X-Conversation-Id` 或内容哈希） |
+| `session_id` | 上游 Sumus 真实会话 ID |
+| `account` | 本次实际使用的账号名 |
+| `model` / `stream` | 请求参数 |
+| `duration_ms` | 从发请求到拿到回复的耗时 |
+| `request` / `reply` | 完整请求消息与回复文本 |
+| `error` | **非空表示本轮失败**，此时 `reply` 为空 |
+
+要点：
+
+- **异步写入**：存档在独立 goroutine 里跑，不阻塞响应，写失败也不影响对话。
+- **成功与失败都记**：401、上游超时等异常同样落盘，便于事后查“当时到底怎么了”。
+- **文件名做了消毒**：会话 ID 里的 `/`、空格等会被替换成 `-`，长度截断 80 字符。
+- **Docker 下自动持久化**：存档目录在 `data/` 内，已被 compose 挂载，容器重启不丢。
+- 面板「对话存档」卡片可查看列表并下载 JSONL。
 
 ## 可用模型
 
@@ -240,6 +280,8 @@ inception/mercury-3
 | `/admin/api/accounts/{name}/disable` | 是 | 禁用账号 |
 | `/admin/api/accounts/{name}/refresh` | 是 | 刷新余额 |
 | `/admin/api/accounts/{name}` | 是 | 删除账号（DELETE，会删磁盘文件） |
+| `/admin/api/transcripts` | 是 | 存档文件列表 |
+| `/admin/api/transcripts/{file}` | 是 | 下载某个存档文件（JSONL） |
 | `/status` | 是 | 账号池详情（JSON，供脚本用） |
 | `/v1/models` | 是 | OpenAI 格式模型列表 |
 | `/v1/chat/completions` | 是 | OpenAI 格式对话接口 |

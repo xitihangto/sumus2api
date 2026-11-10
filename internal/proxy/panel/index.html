@@ -143,6 +143,14 @@
 
   <div class="card">
     <div class="card-h">
+      <h2>对话存档</h2>
+      <span class="hint" id="tpHint">加载中…</span>
+    </div>
+    <div id="transcripts"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">
       <h2>账号</h2>
       <span class="hint">cookie 有效期约 7 天，过期后需重新登录导出</span>
     </div>
@@ -320,6 +328,7 @@ async function load() {
     btn.disabled = false;
     btn.textContent = '刷新';
   }
+  loadTranscripts();
 }
 
 function copy(el) {
@@ -382,7 +391,38 @@ async function del(name) {
   }
 }
 
+async function loadTranscripts() {
+  const box = $('transcripts');
+  const hint = $('tpHint');
+  try {
+    const data = await api('/transcripts');
+    if (!data.enabled) {
+      hint.textContent = '存档未启用';
+      box.innerHTML = '<div class="empty">在 config.json 里设 transcript.dir 可开启存档。</div>';
+      return;
+    }
+    hint.textContent = data.dir;
+    if (!data.files.length) {
+      box.innerHTML = '<div class="empty">还没有存档。发一条对话后再来看。</div>';
+      return;
+    }
+    const rows = data.files.map(f =>
+      '<div class="copy-row"><span class="lbl">' + esc(f.replace(/\.jsonl$/, '')) + '</span>' +
+      '<code class="clip" onclick="viewTranscript(\'' + f + '\')">查看 / 下载 JSONL</code></div>'
+    ).join('');
+    box.innerHTML = rows;
+  } catch (e) {
+    hint.textContent = '加载失败';
+    box.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
+}
+
+function viewTranscript(name) {
+  window.open('/admin/api/transcripts/' + encodeURIComponent(name), '_blank');
+}
+
 load();
+loadTranscripts();
 </script>
 </body>
 </html>

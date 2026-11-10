@@ -22,9 +22,24 @@ type Config struct {
 	// StateFile 是会话粘性等状态落盘路径。
 	StateFile string `json:"state_file"`
 
+	// Transcript 描述对话存档；Dir 为空表示不存档。
+	Transcript Transcript `json:"transcript"`
+
 	Upstream Upstream `json:"upstream"`
 	Pool     Pool     `json:"pool"`
 	Session  Session  `json:"session"`
+}
+
+// Transcript 描述对话存档行为。
+//
+// 上游 Sumus 不保留可回读的会话历史（结果靠轮询拿），
+// 关掉页面就丢。开启后网关把每轮请求与回复写入 JSONL，按会话分文件。
+type Transcript struct {
+	// Dir 是存档目录；空字符串表示不存档。
+	Dir string `json:"dir"`
+	// MaxBytesPerFile 是单个会话文件的体积上限（字节），超出后滚动到 .1 后缀。
+	// 0 表示不限制。
+	MaxBytesPerFile int64 `json:"max_bytes_per_file"`
 }
 
 // Upstream 描述 Sumus 上游的连接参数。
@@ -86,6 +101,10 @@ func Default() *Config {
 		Session: Session{
 			Enabled:    true,
 			TTLMinutes: 30,
+		},
+		Transcript: Transcript{
+			Dir:             "./data/transcripts",
+			MaxBytesPerFile: 5 << 20, // 5 MiB
 		},
 	}
 }
