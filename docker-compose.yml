@@ -1,0 +1,19 @@
+services:
+  sumus2api:
+    image: ghcr.io/xitihangto/sumus2api:latest
+    container_name: sumus2api
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      - TZ=Asia/Shanghai
+    ports:
+      - "7863:7863"
+    volumes:
+      - ./accounts:/app/accounts
+      - ./data:/app/data
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        sed -i 's/"api_key"[[:space:]]*:[[:space:]]*"[^"]*"/"api_key": ""/' /app/config.json
+        exec /usr/local/bin/docker-entrypoint.sh -config /app/config.json

@@ -1,0 +1,24 @@
+{
+  "listen": ":7863",
+  "api_key": "",
+  "account_dir": "./accounts",
+  "state_file": "./data/state.json",
+  "upstream": {
+    "base_url": "https://sumus.im",
+    "client_version": "53888f788f5e",
+    "client_stage": "prod",
+    "client_locale": "zh-CN",
+    "client_timezone": "Asia/Shanghai",
+    "timeout_seconds": 60,
+    "poll_interval_ms": 1200,
+    "poll_timeout_seconds": 300
+  },
+  "pool": {
+    "strategy": "weighted_random",
+    "max_in_flight": 3
+  },
+  "session": {
+    "enabled": true,
+    "ttl_minutes": 30
+  }
+}

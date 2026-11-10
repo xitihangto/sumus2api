@@ -1,0 +1,21 @@
+# 凭证与本地配置绝不进镜像
+accounts/
+data/
+config.json
+*.cookie
+*.session
+
+# 本地构建产物
+sumus2api
+*.test
+*.out
+
+# 版本控制
+.git/
+.gitignore
+.dockerignore
+
+# 文档与杂项
+.DS_Store
+*.md
+!README.md
