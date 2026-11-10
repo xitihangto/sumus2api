@@ -7,7 +7,7 @@
 Sumus 是纯 Web SaaS，只有 Google / Apple / 邮箱登录，没有公开 API。本项目逆向它的私有协议，在本地起一个 OpenAI 兼容网关：
 
 ```
-你的 agent ──OpenAI SDK──> sumus2api (:7863) ──Sumus 私有协议──> sumus.im
+你的 agent ──OpenAI SDK──> sumus2api (:7864) ──Sumus 私有协议──> sumus.im
 ```
 
 - 客户端只写 `/v1/chat/completions` 和 `/v1/models`，现有 SDK 零改造
@@ -105,7 +105,7 @@ go run ./cmd/server -config config.json
 首次启动自动生成 `config.json`（含随机 `api_key`）并打印：
 
 ```
-sumus2api 监听 :7863
+sumus2api 监听 :7864
 账号数: 1
 API key: b2d04583adc586105158c4faf38c3243fdb8ed6f891aa44e
 ```
@@ -138,18 +138,18 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 KEY=<你的 api_key>
 
 # 健康检查（无需鉴权）
-curl http://127.0.0.1:7863/healthz
+curl http://127.0.0.1:7864/healthz
 
 # 模型列表
-curl http://127.0.0.1:7863/v1/models -H "Authorization: Bearer $KEY"
+curl http://127.0.0.1:7864/v1/models -H "Authorization: Bearer $KEY"
 
 # 流式对话
-curl -N http://127.0.0.1:7863/v1/chat/completions \
+curl -N http://127.0.0.1:7864/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"model":"openai/gpt-6-luna","messages":[{"role":"user","content":"你好"}],"stream":true}'
 
 # 非流式对话
-curl http://127.0.0.1:7863/v1/chat/completions \
+curl http://127.0.0.1:7864/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"model":"openai/gpt-6-luna","messages":[{"role":"user","content":"你好"}],"stream":false}'
 ```
@@ -161,7 +161,7 @@ from openai import OpenAI
 
 client = OpenAI(
     api_key="<网关 api_key>",
-    base_url="http://127.0.0.1:7863/v1",
+    base_url="http://127.0.0.1:7864/v1",
 )
 resp = client.chat.completions.create(
     model="anthropic/claude-sonnet-5.5",
@@ -176,7 +176,7 @@ print(resp.choices[0].message.content)
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `listen` | `:7863` | HTTP 监听地址 |
+| `listen` | `:7864` | HTTP 监听地址 |
 | `api_key` | 随机生成 | 网关鉴权密钥；空 = 不鉴权（仅限本机调试） |
 | `account_dir` | `./accounts` | 账号凭证目录 |
 | `state_file` | `./data/state.json` | 状态落盘路径 |

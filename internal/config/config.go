@@ -13,7 +13,7 @@ import (
 
 // Config 是网关的完整运行时配置。
 type Config struct {
-	// Listen 是 HTTP 监听地址，例如 ":7863"。
+	// Listen 是 HTTP 监听地址，例如 ":7864"。
 	Listen string `json:"listen"`
 	// APIKey 是网关自身的鉴权密钥。空字符串表示不鉴权（仅限本机调试）。
 	APIKey string `json:"api_key"`
@@ -66,7 +66,7 @@ type Session struct {
 // Default 返回带推荐默认值的配置。
 func Default() *Config {
 	return &Config{
-		Listen:     ":7863",
+		Listen:     ":7864",
 		AccountDir: "./accounts",
 		StateFile:  "./data/state.json",
 		Upstream: Upstream{

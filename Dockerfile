@@ -45,7 +45,7 @@ RUN mkdir -p /app/accounts /app/data \
 RUN addgroup -g 10001 -S sumus && adduser -u 10001 -S sumus -G sumus \
     && chown -R sumus:sumus /app
 
-EXPOSE 7863
+EXPOSE 7864
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["-config", "/app/config.json"]
