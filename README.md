@@ -246,6 +246,9 @@ inception/mercury-3
 
 ### 账号池管理面板
 
+> **面板地址是 `/admin/`，不是 `/panel/`。**
+> 后者是源码里 `go:embed` 的资源目录名（`internal/proxy/panel/`），不是 HTTP 路由。
+
 浏览器打开 `http://<网关地址>:7864/admin/`。
 
 - **网关未设 `api_key`**（Docker 默认）：直接可用。
