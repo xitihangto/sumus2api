@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sumus2api 账号池</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --card2: #1e222b;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --muted: #8b93a3;
+    --accent: #4f8cff;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d29922;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  h1 .sub { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 10px; }
+  .refresh-btn {
+    background: var(--card2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 7px 14px; cursor: pointer; font-size: 13px;
+  }
+  .refresh-btn:hover { border-color: var(--accent); }
+  .refresh-btn:disabled { opacity: .55; cursor: default; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat {
+    background: var(--card); border: 1px solid var(--border); border-radius: 9px; padding: 14px 16px;
+  }
+  .stat .k { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .stat .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .v.ok { color: var(--green); }
+  .stat .v.warn { color: var(--amber); }
+  .stat .v.bad { color: var(--red); }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .card + .card { margin-top: 16px; }
+  .card-h {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  }
+  .card-h h2 { font-size: 14px; margin: 0; font-weight: 600; }
+  .card-h .hint { color: var(--muted); font-size: 12px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--card2); }
+  td.num { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 13px; }
+  .muted { color: var(--muted); }
+  .name { font-weight: 500; }
+  .email { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 500; border: 1px solid transparent; white-space: nowrap;
+  }
+  .badge.ok { color: var(--green); border-color: rgba(63,185,80,.35); background: rgba(63,185,80,.1); }
+  .badge.off { color: var(--muted); border-color: var(--border); background: rgba(255,255,255,.03); }
+  .badge.bad { color: var(--red); border-color: rgba(248,81,73,.35); background: rgba(248,81,73,.1); }
+  .badge.warn { color: var(--amber); border-color: rgba(210,153,34,.35); background: rgba(210,153,34,.1); }
+
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn {
+    background: transparent; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; line-height: 1.5;
+  }
+  .btn:hover { color: var(--text); border-color: var(--accent); }
+  .btn.danger:hover { color: var(--red); border-color: var(--red); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary:hover { opacity: .9; color: #fff; }
+
+  .empty { padding: 34px 16px; text-align: center; color: var(--muted); }
+
+  form.add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 14px 16px; }
+  form.add input {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 7px 10px; font-size: 13px; font-family: var(--mono);
+  }
+  form.add input:focus { outline: none; border-color: var(--accent); }
+  form.add input.name { width: 160px; }
+  form.add input.token { flex: 1; min-width: 260px; }
+  form.add input.exp { width: 140px; }
+
+  code.clip {
+    font-family: var(--mono); font-size: 12px; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px;
+    cursor: pointer; display: inline-block; word-break: break-all;
+  }
+  code.clip:hover { border-color: var(--accent); }
+  .copy-row { display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .copy-row:last-child { border-bottom: none; }
+  .copy-row .lbl { color: var(--muted); font-size: 12px; min-width: 130px; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--card2); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 18px; border-radius: 8px; font-size: 13px;
+    opacity: 0; pointer-events: none; transition: all .22s ease; z-index: 50;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.err { border-color: var(--red); color: var(--red); }
+  .toast.ok { border-color: var(--green); color: var(--green); }
+
+  .spinner { display: inline-block; width: 11px; height: 11px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -1px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>sumus2api 账号池<span class="sub">Sumus 免费积分 → OpenAI 兼容 API</span></h1>
+    <button class="refresh-btn" id="refresh" onclick="load()">刷新</button>
+  </header>
+
+  <div class="grid" id="stats"></div>
+
+  <div class="card">
+    <div class="card-h">
+      <h2>接入信息</h2>
+      <span class="hint">点击代码块复制</span>
+    </div>
+    <div id="conn"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">
+      <h2>账号</h2>
+      <span class="hint">cookie 有效期约 7 天，过期后需重新登录导出</span>
+    </div>
+    <form class="add" onsubmit="return addAccount(event)">
+      <input class="name" id="addName" placeholder="账号名（可留空）" autocomplete="off">
+      <input class="token" id="addToken" placeholder="session_token" required>
+      <input class="exp" id="addExp" type="number" step="1" placeholder="过期时间戳（可留空）">
+      <button class="btn primary" type="submit" id="addBtn">添加账号</button>
+    </form>
+    <div id="accountTable"></div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let cfg = null;
+
+function toast(msg, kind) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (kind || '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.className = 'toast'; }, 2200);
+}
+
+// 浏览器无法自定义 Authorization 头，故设了 api_key 时把 key 存 sessionStorage，
+// 以 ?key= 形式附带在管理 API 请求上（服务器端仅对 /admin/api/* 开放该方式）。
+function apiKey() {
+  return sessionStorage.getItem('sumus2api_key') || '';
+}
+
+function authQuery() {
+  const k = apiKey();
+  return k ? ('?key=' + encodeURIComponent(k)) : '';
+}
+
+async function api(path, opts) {
+  const url = '/admin/api' + path + authQuery();
+  const res = await fetch(url, opts || {});
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    // key 缺失或错误：引导用户输入，而不是直接报错
+    if (!apiKey()) {
+      const k = prompt('该网关已启用 API key。\n请输入 key（只会存在当前浏览器会话）：');
+      if (k) {
+        sessionStorage.setItem('sumus2api_key', k.trim());
+        return api(path, opts);
+      }
+    } else {
+      sessionStorage.removeItem('sumus2api_key');
+      throw new Error('API key 无效，已清除，请刷新后重试');
+    }
+  }
+  if (!res.ok) throw new Error((data.error && data.error.message) || data.message || ('HTTP ' + res.status));
+  return data;
+}
+
+function fmtCredits(n) {
+  if (!n) return '0';
+  return (n / 1e6).toFixed(2);
+}
+
+function daysLeft(ts) {
+  if (!ts) return null;
+  return Math.floor((ts * 1000 - Date.now()) / 86400000);
+}
+
+function renderStats(accounts) {
+  const total = accounts.length;
+  const healthy = accounts.filter(a => a.valid && !a.disabled).length;
+  const credits = accounts.reduce((s, a) => s + (a.balance || 0), 0);
+  const expiring = accounts.filter(a => {
+    const d = daysLeft(a.cookie_expires_at);
+    return d !== null && d <= 2 && !a.disabled;
+  }).length;
+
+  const items = [
+    { k: '账号总数', v: total, cls: '' },
+    { k: '可用', v: healthy, cls: healthy > 0 ? 'ok' : 'warn' },
+    { k: '总积分', v: fmtCredits(credits), cls: 'ok' },
+    { k: '即将过期', v: expiring, cls: expiring > 0 ? 'bad' : '' },
+  ];
+  $('stats').innerHTML = items.map(i =>
+    '<div class="stat"><div class="k">' + i.k + '</div><div class="v ' + i.cls + '">' + i.v + '</div></div>'
+  ).join('');
+}
+
+function renderConn() {
+  const base = (cfg.base_url || '').replace(/\/$/, '');
+  const key = cfg.api_key_set ? cfg.api_key : '(未设置，网关无鉴权)';
+  const rows = [
+    ['Base URL', base + '/v1'],
+    ['API Key', key],
+    ['模型示例', 'openai/gpt-6-luna'],
+    ['监听', cfg.listen],
+    ['选号策略', cfg.pool.strategy + '（单号上限 ' + cfg.pool.max_in_flight + '）'],
+  ];
+  $('conn').innerHTML = rows.map(r =>
+    '<div class="copy-row"><span class="lbl">' + r[0] + '</span>' +
+    '<code class="clip" onclick="copy(this)">' + esc(r[1]) + '</code></div>'
+  ).join('');
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function renderAccounts(accounts) {
+  if (!accounts.length) {
+    $('accountTable').innerHTML = '<div class="empty">还没有账号。用上面的表单添加，或把凭证文件放进 accounts/ 目录后刷新。</div>';
+    return;
+  }
+
+  const rows = accounts.map(a => {
+    const d = daysLeft(a.cookie_expires_at);
+    let expBadge;
+    if (a.disabled) {
+      expBadge = '<span class="badge bad">已禁用</span>';
+    } else if (d === null) {
+      expBadge = '<span class="badge off">未知</span>';
+    } else if (d < 0) {
+      expBadge = '<span class="badge bad">已过期</span>';
+    } else if (d <= 2) {
+      expBadge = '<span class="badge warn">' + d + ' 天后过期</span>';
+    } else {
+      expBadge = '<span class="badge ok">' + d + ' 天后过期</span>';
+    }
+
+    const status = a.disabled
+      ? '<span class="badge bad">disabled</span>'
+      : (a.valid ? '<span class="badge ok">可用</span>' : '<span class="badge off">无 token</span>');
+
+    const inflight = a.in_flight > 0 ? '<span class="badge warn">' + a.in_flight + ' 在途</span>' : '';
+
+    const actions = [];
+    if (a.disabled) {
+      actions.push('<button class="btn" onclick="act(\'' + a.name + '\',\'enable\')">启用</button>');
+    } else {
+      actions.push('<button class="btn" onclick="act(\'' + a.name + '\',\'disable\')">禁用</button>');
+    }
+    actions.push('<button class="btn" onclick="act(\'' + a.name + '\',\'refresh\')">刷新余额</button>');
+    actions.push('<button class="btn danger" onclick="del(\'' + a.name + '\')">删除</button>');
+
+    return '<tr>' +
+      '<td><div class="name">' + esc(a.display_name || a.name) + '</div>' +
+      '<div class="email">' + esc(a.email || a.name) + '</div></td>' +
+      '<td class="num">' + fmtCredits(a.balance) + '</td>' +
+      '<td>' + status + ' ' + inflight + '</td>' +
+      '<td>' + expBadge + '</td>' +
+      '<td><div class="actions">' + actions.join('') + '</div></td>' +
+    '</tr>';
+  }).join('');
+
+  $('accountTable').innerHTML = '<table>' +
+    '<thead><tr><th>账号</th><th>积分</th><th>状态</th><th>cookie</th><th>操作</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table>';
+}
+
+async function load() {
+  const btn = $('refresh');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 刷新中';
+  try {
+    const data = await api('/accounts');
+    cfg = data.config;
+    renderStats(data.accounts);
+    renderConn();
+    renderAccounts(data.accounts);
+  } catch (e) {
+    toast('加载失败: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '刷新';
+  }
+}
+
+function copy(el) {
+  const text = el.textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => toast('已复制', 'ok'))
+      .catch(() => toast('复制失败，请手动选择', 'err'));
+  } else {
+    toast('当前环境不支持自动复制', 'err');
+  }
+}
+
+async function addAccount(e) {
+  e.preventDefault();
+  const btn = $('addBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 添加中';
+  try {
+    await api('/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: $('addName').value.trim(),
+        session_token: $('addToken').value.trim(),
+        cookie_expires_at: $('addExp').value ? Number($('addExp').value) : 0,
+      }),
+    });
+    $('addName').value = '';
+    $('addToken').value = '';
+    $('addExp').value = '';
+    toast('账号已添加', 'ok');
+    await load();
+  } catch (err) {
+    toast('添加失败: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '添加账号';
+  }
+  return false;
+}
+
+async function act(name, action) {
+  try {
+    await api('/accounts/' + encodeURIComponent(name) + '/' + action, { method: 'POST' });
+    toast('操作成功', 'ok');
+    await load();
+  } catch (e) {
+    toast('操作失败: ' + e.message, 'err');
+  }
+}
+
+async function del(name) {
+  if (!confirm('确定删除账号 "' + name + '"？\n凭证文件将从磁盘移除，不可恢复。')) return;
+  try {
+    await api('/accounts/' + encodeURIComponent(name), { method: 'DELETE' });
+    toast('已删除', 'ok');
+    await load();
+  } catch (e) {
+    toast('删除失败: ' + e.message, 'err');
+  }
+}
+
+load();
+</script>
+</body>
+</html>

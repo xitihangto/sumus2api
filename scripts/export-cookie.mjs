@@ -31,9 +31,15 @@ if (!auth) {
   console.error(JSON.stringify({ error: "no_session_cookie", found: cookies.map(c => c.name) }));
   process.exit(1);
 }
+// CDP 对会话 cookie 可能返回 -1 / 缺失；better-auth 的 session 有效期约 7 天，
+// 拿不到时按 7 天兜底，避免面板过期倒计时恒为 0。
+const exp = Number(auth.expires);
+const expiresAt = (Number.isFinite(exp) && exp > 0)
+  ? Math.floor(exp)
+  : Math.floor(Date.now() / 1000) + 7 * 86400;
 console.log(JSON.stringify({
   session_token: auth.value,
-  cookie_expires_at: Math.floor(auth.expires),
+  cookie_expires_at: expiresAt,
 }));
 `;
 

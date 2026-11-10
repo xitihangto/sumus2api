@@ -50,6 +50,69 @@ func (c *Cred) Lock() { c.mu.Lock() }
 // Unlock 释放 Lock。
 func (c *Cred) Unlock() { c.mu.Unlock() }
 
+// Path 返回凭证文件路径（面板删除账号时定位文件用）。
+// 注意：Cred 内部已有同名字段 FilePath 且被 json:"-" 隐藏，这里提供只读访问器。
+func (c *Cred) Path() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.FilePath
+}
+
+// SetDisabled 启用或禁用账号（面板开关用）。
+func (c *Cred) SetDisabled(disabled bool, reason string) {
+	c.mu.Lock()
+	c.Disabled = disabled
+	if disabled {
+		c.DisableRea = reason
+	} else {
+		c.DisableRea = ""
+	}
+	c.mu.Unlock()
+}
+
+// Snapshot 返回凭证的只读视图，供面板展示，避免直接暴露内部锁语义。
+type Snapshot struct {
+	Name            string `json:"name"`
+	FilePath        string `json:"file_path"`
+	Email           string `json:"email"`
+	DisplayName     string `json:"display_name"`
+	WorkspaceID     string `json:"workspace_id"`
+	AgentID         string `json:"agent_id"`
+	Balance         int64  `json:"balance"`
+	CookieExpiresAt int64  `json:"cookie_expires_at"`
+	Disabled        bool   `json:"disabled"`
+	DisabledReason  string `json:"disabled_reason"`
+	InFlight        int    `json:"in_flight"`
+	Valid           bool   `json:"valid"`
+}
+
+// Snapshot 生成当前凭证的只读快照。
+// InFlight() 会自行加锁，因此不能在外层持有 c.Lock() 时调用。
+func (c *Cred) Snapshot() Snapshot {
+	c.Lock()
+	s := Snapshot{
+		FilePath:        c.FilePath,
+		Email:           c.Email,
+		DisplayName:     c.Name,
+		WorkspaceID:     c.WorkspaceID,
+		AgentID:         c.AgentID,
+		Balance:         c.Balance,
+		CookieExpiresAt: c.CookieExpiresAt,
+		Disabled:        c.Disabled,
+		DisabledReason:  c.DisableRea,
+	}
+	c.Unlock()
+	s.InFlight = c.InFlight()
+	s.Valid = s.FilePath != "" && c.Valid()
+	if s.DisplayName == "" {
+		s.DisplayName = s.Email
+	}
+	if s.Name == "" {
+		s.Name = filepath.Base(s.FilePath)
+	}
+	return s
+}
+
 // InFlight 返回当前在途请求数。
 func (c *Cred) InFlight() int {
 	c.mu.Lock()
@@ -163,11 +226,12 @@ func LoadDir(dir string) ([]*Cred, error) {
 // Store 是线程安全的凭证容器。
 type Store struct {
 	mu    sync.RWMutex
+	dir   string
 	creds []*Cred
 }
 
-// NewStore 构造空容器。
-func NewStore() *Store { return &Store{} }
+// NewStore 构造空容器，dir 为账号目录（面板新增账号时写入此处）。
+func NewStore(dir string) *Store { return &Store{dir: dir} }
 
 // Replace 整体替换凭证集合（启动加载或热加载时用）。
 func (s *Store) Replace(creds []*Cred) {
@@ -196,4 +260,36 @@ func (s *Store) Add(c *Cred) {
 		}
 	}
 	s.creds = append(s.creds, c)
+}
+
+// Remove 按文件路径移除凭证，返回被移除的凭证（不存在则返回 nil）。
+func (s *Store) Remove(path string) *Cred {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, c := range s.creds {
+		if c.FilePath == path {
+			s.creds = append(s.creds[:i], s.creds[i+1:]...)
+			return c
+		}
+	}
+	return nil
+}
+
+// Find 按文件路径查找凭证（面板启禁用/刷新用）。
+func (s *Store) Find(path string) *Cred {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, c := range s.creds {
+		if c.FilePath == path {
+			return c
+		}
+	}
+	return nil
+}
+
+// Dir 返回账号目录（面板新增账号时写入位置）。
+func (s *Store) Dir() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.dir
 }

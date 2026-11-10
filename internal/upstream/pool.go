@@ -61,6 +61,18 @@ func (p *Pool) List() []*account.Cred {
 	return p.store.List()
 }
 
+// Add 把新凭证加入池（面板新增账号时用）。
+func (p *Pool) Add(c *account.Cred) { p.store.Add(c) }
+
+// Find 按文件路径查找凭证（面板启禁用/刷新时用）。
+func (p *Pool) Find(path string) *account.Cred { return p.store.Find(path) }
+
+// Remove 按文件路径移除凭证（面板删除账号时用）。
+func (p *Pool) Remove(path string) *account.Cred { return p.store.Remove(path) }
+
+// Store 暴露底层容器（供面板新增账号时定位目录）。
+func (p *Pool) Store() *account.Store { return p.store }
+
 // Pick 选一个可用账号。conversationKey 非空时优先复用粘性绑定。
 func (p *Pool) Pick(conversationKey string) (*account.Cred, error) {
 	creds := p.store.List()

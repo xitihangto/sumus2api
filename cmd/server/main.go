@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -31,7 +30,7 @@ func main() {
 		log.Fatalf("创建账号目录失败: %v", err)
 	}
 
-	store := account.NewStore()
+	store := account.NewStore(cfg.AccountDir)
 	creds, err := account.LoadDir(cfg.AccountDir)
 	if err != nil {
 		log.Fatalf("加载账号失败: %v", err)
@@ -68,7 +67,7 @@ func main() {
 	defer bgCancel()
 	pool.StartGC(bgCtx, 5*time.Minute)
 
-	handler := proxy.NewHandler(cfg, client, pool)
+	handler := proxy.NewHandler(cfg, client, pool, store)
 
 	addr := cfg.Listen
 	srv := &http.Server{
@@ -102,48 +101,7 @@ func main() {
 }
 
 // warmup 拉取账号身份、工作区与余额，补齐凭证字段。
+// 具体实现见 proxy.WarmupCred，启动预热与面板刷新共用。
 func warmup(ctx context.Context, client *upstream.Client, c *account.Cred) error {
-	me, err := client.FetchMe(ctx, c.SessionToken)
-	if err != nil {
-		return fmt.Errorf("拉取身份: %w", err)
-	}
-	c.Lock()
-	c.UserID = me.ID
-	c.Email = me.Email
-	c.Name = me.Name
-	c.Unlock()
-
-	// 拉工作区与默认 agent（首账号信息即可）
-	bs, err := client.FetchBalance(ctx, c.SessionToken, "")
-	if err == nil {
-		c.Lock()
-		c.Balance = parseInt64(bs.Balance)
-		c.Unlock()
-	}
-
-	// 用 shell 视图拿 workspace 与 agents
-	// 简化：直接用已知 workspace 端点
-	wss, err := client.FetchWorkspaces(ctx, c.SessionToken)
-	if err == nil && len(wss) > 0 {
-		c.Lock()
-		c.WorkspaceID = wss[0].ID
-		c.Unlock()
-	}
-
-	agents, err := client.FetchAgents(ctx, c.SessionToken, c.WorkspaceID)
-	if err == nil && len(agents) > 0 {
-		c.Lock()
-		c.AgentID = agents[0].ID
-		c.Unlock()
-	}
-
-	_ = c.SaveAtomic()
-	return nil
-}
-
-// parseInt64 宽松解析整数字符串。
-func parseInt64(s string) int64 {
-	var n int64
-	_, _ = fmt.Sscanf(s, "%d", &n)
-	return n
+	return proxy.WarmupCred(ctx, client, c)
 }

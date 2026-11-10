@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"sumus2api/internal/account"
 	"sumus2api/internal/config"
 	"sumus2api/internal/upstream"
 )
@@ -19,26 +20,31 @@ type Handler struct {
 	cfg    *config.Config
 	client *upstream.Client
 	pool   *upstream.Pool
+	store  *account.Store
 }
 
-// NewHandler 构造处理器。
-func NewHandler(cfg *config.Config, client *upstream.Client, pool *upstream.Pool) *Handler {
-	return &Handler{cfg: cfg, client: client, pool: pool}
+// NewHandler 构造处理器。store 用于面板新增账号时定位写入目录。
+func NewHandler(cfg *config.Config, client *upstream.Client, pool *upstream.Pool, store *account.Store) *Handler {
+	return &Handler{cfg: cfg, client: client, pool: pool, store: store}
 }
 
 // ServeHTTP 路由分发。
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// healthz 是探活端点，不鉴权
+	// 免鉴权白名单：探活与面板静态页。
+	// 面板页只是 HTML 壳，真正的数据写操作由 /admin/api/* 单独鉴权。
 	if r.URL.Path == "/healthz" {
 		h.handleHealth(w, r)
 		return
 	}
+	if r.URL.Path == "/admin" || r.URL.Path == "/admin/" {
+		h.servePanel(w, r)
+		return
+	}
 
-	// 其余路径鉴权
+	// 其余路径鉴权。管理 API 额外支持 ?key=，
+	// 因为浏览器无法自定义 Authorization 头（面板需据此在设了 key 时也能用）。
 	if h.cfg.APIKey != "" {
-		auth := r.Header.Get("Authorization")
-		token := strings.TrimPrefix(auth, "Bearer ")
-		if token == "" || token != h.cfg.APIKey {
+		if !h.authorized(r) {
 			writeOpenAIError(w, http.StatusUnauthorized, "invalid_api_key", "无效的 API key")
 			return
 		}
@@ -52,8 +58,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/status":
 		h.handleStatus(w, r)
 	default:
+		// /admin/api/* 的动态子路径
+		if strings.HasPrefix(r.URL.Path, "/admin/") {
+			h.handleAdmin(w, r)
+			return
+		}
 		writeOpenAIError(w, http.StatusNotFound, "not_found", "未知路径: "+r.URL.Path)
 	}
+}
+
+// authorized 校验请求是否携带正确的凭据。
+// 优先看 Authorization 头，其次看 ?key=（仅对 /admin/api/* 开放）。
+func (h *Handler) authorized(r *http.Request) bool {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if token != "" && token == h.cfg.APIKey {
+		return true
+	}
+	if strings.HasPrefix(r.URL.Path, "/admin/api/") {
+		if k := r.URL.Query().Get("key"); k != "" && k == h.cfg.APIKey {
+			return true
+		}
+	}
+	return false
 }
 
 // chatRequest 是 OpenAI chat/completions 请求体（仅取我们需要的字段）。
@@ -317,6 +343,56 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"accounts": rows})
+}
+
+// warmupCred 拉取账号身份、工作区、agent 与余额，补齐凭证字段并落盘。
+// 启动预热与面板新增/刷新共用。
+func (h *Handler) warmupCred(ctx context.Context, c *account.Cred) error {
+	return WarmupCred(ctx, h.client, c)
+}
+
+// WarmupCred 拉取账号身份、工作区、agent 与余额，补齐凭证字段并落盘。
+// 导出以便 main 启动预热复用，避免重复实现。
+func WarmupCred(ctx context.Context, client *upstream.Client, c *account.Cred) error {
+	me, err := client.FetchMe(ctx, c.SessionToken)
+	if err != nil {
+		return fmt.Errorf("拉取身份: %w", err)
+	}
+	c.Lock()
+	c.UserID = me.ID
+	c.Email = me.Email
+	c.Name = me.Name
+	c.Unlock()
+
+	if bs, err := client.FetchBalance(ctx, c.SessionToken, ""); err == nil {
+		c.Lock()
+		c.Balance = parseInt64(bs.Balance)
+		c.Unlock()
+	}
+
+	wss, err := client.FetchWorkspaces(ctx, c.SessionToken)
+	if err == nil && len(wss) > 0 {
+		c.Lock()
+		c.WorkspaceID = wss[0].ID
+		c.Unlock()
+	}
+
+	agents, err := client.FetchAgents(ctx, c.SessionToken, c.WorkspaceID)
+	if err == nil && len(agents) > 0 {
+		c.Lock()
+		c.AgentID = agents[0].ID
+		c.Unlock()
+	}
+
+	_ = c.SaveAtomic()
+	return nil
+}
+
+// parseInt64 宽松解析整数字符串（余额字段是字符串形式）。
+func parseInt64(s string) int64 {
+	var n int64
+	_, _ = fmt.Sscanf(s, "%d", &n)
+	return n
 }
 
 // writeOpenAIError 输出 OpenAI 格式的错误响应。

@@ -234,9 +234,32 @@ inception/mercury-3
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
 | `/healthz` | 否 | 健康检查，返回 `{"healthy":N,"total":M,"service":"sumus2api"}` |
-| `/status` | 是 | 账号池详情：余额、在途数、禁用状态 |
+| `/admin/` | 是 | **账号池管理面板**（内嵌 Web 页面） |
+| `/admin/api/accounts` | 是 | 账号列表 + 接入配置（GET）/ 新增账号（POST） |
+| `/admin/api/accounts/{name}/enable` | 是 | 启用账号 |
+| `/admin/api/accounts/{name}/disable` | 是 | 禁用账号 |
+| `/admin/api/accounts/{name}/refresh` | 是 | 刷新余额 |
+| `/admin/api/accounts/{name}` | 是 | 删除账号（DELETE，会删磁盘文件） |
+| `/status` | 是 | 账号池详情（JSON，供脚本用） |
 | `/v1/models` | 是 | OpenAI 格式模型列表 |
 | `/v1/chat/completions` | 是 | OpenAI 格式对话接口 |
+
+### 账号池管理面板
+
+浏览器打开 `http://<网关地址>:7864/admin/`。
+
+- **网关未设 `api_key`**（Docker 默认）：直接可用。
+- **网关设了 `api_key`**：面板页面本身免鉴权，但数据请求会返回 401 并弹出输入框，输入后 key 存入 `sessionStorage`，后续请求以 `?key=` 携带。该方式**仅对 `/admin/api/*` 开放**，`/v1/*` 仍只认 `Authorization` 头。
+
+面板功能：
+
+- **概览卡片**：账号总数、可用数、总积分、即将过期数
+- **接入信息**：Base URL / API Key / 选号策略，点击即复制
+- **账号表格**：积分、可用状态、在途数、cookie 剩余天数（≤2 天黄色告警，已过期红色）
+- **操作**：启用 / 禁用 / 刷新余额 / 删除（带确认）
+- **新增账号**：填 `session_token`（可选填名字与过期时间戳），提交后自动预热补齐身份与余额
+
+> 面板与 API 共用同一套鉴权。若网关**未设** `api_key`（Docker 默认），则面板完全开放——任何能访问 7864 端口的人都能增删账号。建议仅在可信网络内使用，或自行在反向代理层加访问控制。
 
 ## 项目结构
 
@@ -250,6 +273,10 @@ sumus2api/
 │   │   ├── client.go         #   HTTP 端点封装
 │   │   └── pool.go           #   选号/粘性/轮询对话
 │   └── proxy/                # OpenAI 兼容层
+│       ├── handler.go        #   路由分发、鉴权、对话接口
+│       ├── panel.go          #   账号池管理 API（/admin/api/*）
+│       └── panel/            #   内嵌管理面板（embed 进二进制）
+│           └── index.html
 ├── scripts/
 │   └── export-cookie.mjs     # 从 ego lite 导出 cookie
 ├── .github/workflows/
